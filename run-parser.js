@@ -1,37 +1,26 @@
 /**
- * run-parser.js - STS2 .run File Parser
+ * run-parser.js - STS2 .run File Parser (v2 — correct schema)
  *
- * Parses the structured JSON .run files from:
+ * Parses .run files from:
  *   ~/Library/Application Support/SlayTheSpire2/steam/<uid>/profile1/saves/history/
  *
- * These are the canonical run records saved by the game — far richer than Godot
- * log files. Each file is a JSON object with the full floor-by-floor history of
- * one complete run.
- *
- * Schema version: 8 (STS2 v0.99.1)
- *
- * Key fields available:
- *   .win                   bool
- *   .was_abandoned         bool
- *   .ascension             int
- *   .start_time            unix timestamp
- *   .run_time              seconds
- *   .seed                  string
- *   .killed_by_encounter   string
- *   .acts                  [string] — act names visited
- *   .players[0]:
- *     .character           string
- *     .deck[]              { id, current_upgrade_level, floor_added_to_deck }
- *     .relics[]            { id, floor_added_to_deck }
- *     .potions[]           { id, slot_index }
- *   .map_point_history[]   floor-by-floor: room type, HP, gold, cards, relics, choices
+ * IMPORTANT schema discoveries (v0.99.1, schema_version 8):
+ *   - map_point_history is a LIST OF LISTS: one sub-array per Act visited
+ *   - map_point_types: 'ancient','monster','elite','boss','rest_site','shop','treasure','unknown'
+ *   - 'ancient' = the opening Neow relic choice (ancient_choice field)
+ *   - 'unknown' = random event room (has event_choices + sometimes relic_choices)
+ *   - 'shop' has:  bought_relics, card_choices (shown), cards_gained (purchased), relic_choices
+ *   - 'treasure' has: relic_choices, upgraded_cards (Treasure chest upgrades)
+ *   - 'rest_site' has: rest_site_choices ('SMITH'|'REST'|'RECALL'), upgraded_cards
+ *   - player_stats.potion_used = array of potion IDs used during combat
+ *   - player_stats.ancient_choice = starting relic picks [{ TextKey, was_chosen }]
  */
 
 const fs   = require('fs');
 const path = require('path');
 const os   = require('os');
 
-// ─── Path ─────────────────────────────────────────────────────────────────────
+// ─── Paths ────────────────────────────────────────────────────────────────────
 
 const STEAM_ID = process.env.STEAM_ID || '76561199098125055';
 const PROFILE  = process.env.PROFILE  || 'profile1';
@@ -46,59 +35,92 @@ const RUN_HISTORY_DIR = path.join(
 
 // ─── File discovery ───────────────────────────────────────────────────────────
 
-/**
- * Find all .run files modified within the last N days, newest first.
- * @param {number} daysBack
- * @returns {Array<{name, path, startTime, mtime}>}
- */
 function findRunFiles(daysBack = 7) {
   const cutoff = Date.now() - daysBack * 24 * 60 * 60 * 1000;
-
   return fs.readdirSync(RUN_HISTORY_DIR)
     .filter(f => f.endsWith('.run'))
     .map(f => {
       const fullPath = path.join(RUN_HISTORY_DIR, f);
       const stat = fs.statSync(fullPath);
-      // Filename is the unix start_time
       const startTime = parseInt(f.replace('.run', ''), 10);
       return { name: f, path: fullPath, startTime, mtime: stat.mtime };
     })
     .filter(f => f.mtime.getTime() >= cutoff)
-    .sort((a, b) => b.startTime - a.startTime); // newest first
+    .sort((a, b) => b.startTime - a.startTime);
 }
 
-/**
- * Find the single most recent .run file.
- */
 function findLatestRunFile() {
-  return findRunFiles(365).slice(0, 1)[0] || null;
+  const all = findRunFiles(365);
+  return all.length > 0 ? all[0] : null;
 }
 
 // ─── Single run parser ────────────────────────────────────────────────────────
 
-/**
- * Parse one .run JSON file into a normalized run object.
- * @param {string} filePath
- * @returns {Object} Structured run data
- */
 function parseRunFile(filePath) {
   const raw = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   const player = raw.players?.[0] || {};
-  const history = raw.map_point_history || [];
 
-  // ── Floor-by-floor analysis ──
-  const floors = history.map((point, floorIndex) => {
-    const ps = point.player_stats?.[0] || {};
-    const room = point.rooms?.[0] || {};
+  // map_point_history is List<List<MapPoint>> — one list per act
+  const actArrays = raw.map_point_history || [];
+  // Flatten all floors with act index attached
+  const allFloors = [];
+  actArrays.forEach((actFloors, actIdx) => {
+    if (!Array.isArray(actFloors)) return;
+    actFloors.forEach(pt => allFloors.push({ ...pt, _actIndex: actIdx }));
+  });
+
+  // ── Parse each floor ──────────────────────────────────────────────────────
+  const floors = allFloors.map((pt, i) => {
+    const ps   = pt.player_stats?.[0] || {};
+    const room = pt.rooms?.[0] || {};
+    const mpt  = pt.map_point_type;
+
+    // Starting Neow relic choice
+    const ancientChoice = (ps.ancient_choice || []).map(c => ({
+      id: c.TextKey,
+      picked: c.was_chosen,
+    }));
+
+    // Card choices (offered at combat reward, shop, event)
+    const cardChoices = (ps.card_choices || []).map(c => ({
+      id: c.card?.id,
+      picked: c.was_picked,
+    }));
+
+    // Shop: relics available vs bought
+    const relicChoicesRaw = ps.relic_choices || [];
+    const relicChoices = relicChoicesRaw.map(r => ({ id: r.choice, picked: r.was_picked }));
+    const boughtRelics = ps.bought_relics || []; // shop purchases (separate from relic_choices)
+
+    // Potion choices (offered in combat / event)
+    const potionChoices = (ps.potion_choices || []).map(p => ({
+      id: p.choice,
+      picked: p.was_picked,
+    }));
+
+    // Event choices (text key of chosen option)
+    const eventChoices = (ps.event_choices || []).map(e => ({
+      key: e.title?.key || JSON.stringify(e),
+      variables: e.variables || {},
+    }));
+
+    // Upgrades (from rest site SMITH, treasure chest, event)
+    const upgradedCards = ps.upgraded_cards || [];
+
+    // Rest site
+    const restAction = ps.rest_site_choices?.[0] || null;
+
     return {
-      floor: floorIndex + 1,
-      mapPointType: point.map_point_type,        // 'monster','elite','boss','rest_site','treasure','unknown'
-      roomType: room.room_type,
+      floor: i + 1,
+      actIndex: pt._actIndex,
+      mapPointType: mpt,
+      roomType: room.room_type || mpt,
       encounterId: room.model_id || null,
       monsterIds: room.monster_ids || [],
       turnsTaken: room.turns_taken || 0,
 
-      // HP at END of this floor
+      // HP
+      hpBefore: null, // not directly stored; track via prev floor's hpEnd
       hpEnd: ps.current_hp ?? null,
       hpMax: ps.max_hp ?? null,
       hpLost: ps.damage_taken ?? 0,
@@ -106,81 +128,103 @@ function parseRunFile(filePath) {
       maxHpGained: ps.max_hp_gained ?? 0,
       maxHpLost: ps.max_hp_lost ?? 0,
 
-      // Gold at END of this floor
+      // Gold
       goldEnd: ps.current_gold ?? null,
       goldGained: ps.gold_gained ?? 0,
       goldSpent: ps.gold_spent ?? 0,
       goldLost: ps.gold_lost ?? 0,
+      goldStolen: ps.gold_stolen ?? 0,
 
       // Cards
-      cardChoices: (ps.card_choices || []).map(c => ({
-        id: c.card?.id,
-        picked: c.was_picked,
-      })),
+      cardChoices,
       cardsGained: (ps.cards_gained || []).map(c => c.id),
-      cardsRemoved: ps.cards_removed || [],
-      upgradedCards: ps.upgraded_cards || [],
+      upgradedCards,
 
       // Relics
-      relicChoices: (ps.relic_choices || []).map(r => ({
-        id: r.choice,
-        picked: r.was_picked,
-      })),
+      ancientChoice,        // Neow opening choice
+      relicChoices,         // combat/elite/treasure/event relic reward choices
+      boughtRelics,         // shop purchases
 
       // Potions
-      potionChoices: (ps.potion_choices || []).map(p => ({
-        id: p.choice,
-        picked: p.was_picked,
-      })),
+      potionChoices,
       potionsUsed: ps.potion_used || [],
-      potionsDiscarded: ps.potion_discarded || [],
 
-      // Rest site action
-      restAction: ps.rest_site_choices?.[0] || null, // 'SMITH' | 'REST' | 'RECALL'
+      // Event
+      eventChoices,
 
-      // Events
-      eventChoices: (ps.event_choices || []).map(e => e.title?.key || JSON.stringify(e)),
+      // Rest
+      restAction,
     };
   });
 
-  // ── Derived stats ──
+  // ── Convenience derived stats ─────────────────────────────────────────────
   const combatFloors   = floors.filter(f => ['monster','elite','boss'].includes(f.roomType));
   const eliteFloors    = floors.filter(f => f.roomType === 'elite');
   const bossFloors     = floors.filter(f => f.roomType === 'boss');
   const restFloors     = floors.filter(f => f.roomType === 'rest_site');
   const shopFloors     = floors.filter(f => f.roomType === 'shop');
+  const eventFloors    = floors.filter(f => f.roomType === 'event' || f.mapPointType === 'unknown');
+  const treasureFloors = floors.filter(f => f.mapPointType === 'treasure');
 
-  const totalDmgTaken  = floors.reduce((s, f) => s + f.hpLost, 0);
-  const totalHpHealed  = floors.reduce((s, f) => s + f.hpHealed, 0);
-  const totalGoldGained = floors.reduce((s, f) => s + f.goldGained, 0);
-  const totalGoldSpent  = floors.reduce((s, f) => s + f.goldSpent, 0);
+  const totalDmgTaken    = floors.reduce((s, f) => s + f.hpLost, 0);
+  const totalHpHealed    = floors.reduce((s, f) => s + f.hpHealed, 0);
+  const totalGoldGained  = floors.reduce((s, f) => s + f.goldGained, 0);
+  const totalGoldSpent   = floors.reduce((s, f) => s + f.goldSpent, 0);
+  const totalGoldStolen  = floors.reduce((s, f) => s + f.goldStolen, 0);
+  const totalMaxHpGained = floors.reduce((s, f) => s + f.maxHpGained, 0);
+
   const avgTurnsPerCombat = combatFloors.length
-    ? (combatFloors.reduce((s, f) => s + f.turnsTaken, 0) / combatFloors.length).toFixed(1)
+    ? +(combatFloors.reduce((s, f) => s + f.turnsTaken, 0) / combatFloors.length).toFixed(1)
     : 0;
 
-  // Card draft decisions
-  const allCardChoices   = floors.flatMap(f => f.cardChoices);
-  const cardPickRate     = allCardChoices.length > 0
-    ? Math.round(allCardChoices.filter(c => c.picked).length / allCardChoices.length * 100)
-    : 0;
-  const skippedCards     = allCardChoices.filter(c => !c.picked).map(c => c.id);
+  // Card decisions
+  const allCardChoices = floors.flatMap(f => f.cardChoices);
+  const cardPickCount  = allCardChoices.filter(c => c.picked).length;
+  const cardPickRate   = allCardChoices.length > 0
+    ? Math.round(cardPickCount / allCardChoices.length * 100) : 0;
+  const skippedCards   = allCardChoices.filter(c => !c.picked).map(c => c.id);
 
-  // Rest site choices
-  const smithCount  = restFloors.filter(f => f.restAction === 'SMITH').length;
-  const restCount   = restFloors.filter(f => f.restAction === 'REST').length;
+  // Relic decisions (combat/elite/treasure rewards — not shop)
+  const allRelicChoices     = floors.flatMap(f => f.relicChoices);
+  const relicsOfferedNotTaken = allRelicChoices.filter(r => !r.picked).map(r => r.id);
 
-  // Final deck
+  // Shop
+  const allBoughtRelics = floors.flatMap(f => f.boughtRelics);
+  const allShopCards    = shopFloors.flatMap(f => f.cardsGained);
+
+  // Potions used
+  const allPotionsUsed = floors.flatMap(f => f.potionsUsed);
+
+  // Upgrades breakdown
+  const smithUpgrades    = restFloors.flatMap(f => f.upgradedCards);
+  const treasureUpgrades = treasureFloors.flatMap(f => f.upgradedCards);
+  const eventUpgrades    = eventFloors.flatMap(f => f.upgradedCards);
+  const totalUpgrades    = smithUpgrades.length + treasureUpgrades.length + eventUpgrades.length;
+
+  // Neow choice
+  const neowFloor      = floors.find(f => f.mapPointType === 'ancient');
+  const neowChoice     = neowFloor?.ancientChoice || [];
+  const neowPicked     = neowChoice.find(c => c.picked);
+  const neowNotPicked  = neowChoice.filter(c => !c.picked).map(c => c.id);
+
+  // Rest behavior
+  const smithCount = restFloors.filter(f => f.restAction === 'SMITH').length;
+  const restCount  = restFloors.filter(f => f.restAction === 'REST').length;
+  const recallCount = restFloors.filter(f => f.restAction === 'RECALL').length;
+
+  // Final deck + relics
   const finalDeck = (player.deck || []).map(c => ({
     id: c.id,
     upgradeLevel: c.current_upgrade_level || 0,
     floorAdded: c.floor_added_to_deck,
+    props: c.props || null,
   }));
-
-  // Final relics (in order obtained)
   const relics = (player.relics || []).map(r => ({
     id: r.id,
     floorAdded: r.floor_added_to_deck,
+    props: r.props || null,
   })).sort((a, b) => a.floorAdded - b.floorAdded);
+  const finalPotions = (player.potions || []).map(p => p.id);
 
   return {
     // ── Identity ──
@@ -193,7 +237,6 @@ function parseRunFile(filePath) {
     seed: raw.seed,
     gameMode: raw.game_mode,
     ascension: raw.ascension || 0,
-    schemaVersion: raw.schema_version,
 
     // ── Outcome ──
     win: raw.win,
@@ -201,10 +244,16 @@ function parseRunFile(filePath) {
     killedByEncounter: raw.killed_by_encounter || null,
     killedByEvent: raw.killed_by_event !== 'NONE.NONE' ? raw.killed_by_event : null,
 
-    // ── Character ──
+    // ── Character / Acts ──
     character: player.character,
     actsVisited: raw.acts || [],
     floorsReached: floors.length,
+    totalActs: actArrays.length,
+
+    // ── Opening choice (Neow / Ancient) ──
+    neowPicked: neowPicked?.id || null,
+    neowOptions: neowChoice.map(c => c.id),
+    neowNotPicked,
 
     // ── Final state ──
     finalDeck,
@@ -212,7 +261,7 @@ function parseRunFile(filePath) {
     upgradedCardCount: finalDeck.filter(c => c.upgradeLevel > 0).length,
     relics,
     relicCount: relics.length,
-    finalPotions: (player.potions || []).map(p => p.id),
+    finalPotions,
     finalHp: floors[floors.length - 1]?.hpEnd ?? null,
     finalMaxHp: floors[floors.length - 1]?.hpMax ?? null,
     finalGold: floors[floors.length - 1]?.goldEnd ?? null,
@@ -220,67 +269,90 @@ function parseRunFile(filePath) {
     // ── Combat stats ──
     totalCombats: combatFloors.length,
     elitesAttempted: eliteFloors.length,
+    eliteEncounters: eliteFloors.map(f => ({ id: f.encounterId, floor: f.floor, hpLost: f.hpLost, turns: f.turnsTaken })),
     bossesAttempted: bossFloors.length,
+    bossEncounters: bossFloors.map(f => ({ id: f.encounterId, floor: f.floor, hpLost: f.hpLost, turns: f.turnsTaken })),
     totalDmgTaken,
     totalHpHealed,
-    avgTurnsPerCombat: parseFloat(avgTurnsPerCombat),
+    avgTurnsPerCombat,
+    totalMaxHpGained,
 
     // ── Economy ──
     totalGoldGained,
     totalGoldSpent,
+    totalGoldStolen,
     shopVisits: shopFloors.length,
+    allBoughtRelics,       // relics purchased at shop
+    allShopCards,          // cards purchased at shop
 
-    // ── Draft decisions ──
+    // ── Card drafting ──
     cardPickRate,
     skippedCards,
+    allCardChoices,
+
+    // ── Relic decisions ──
+    relicsOfferedNotTaken, // relics offered at rewards but not picked
+
+    // ── Potions ──
+    allPotionsUsed,
+    finalPotions,
+
+    // ── Upgrades breakdown ──
+    totalUpgrades,
+    smithUpgrades,
+    treasureUpgrades,
+    eventUpgrades,
+
+    // ── Rest behavior ──
     smithCount,
     restCount,
+    recallCount,
+    totalRestSites: restFloors.length,
 
-    // ── Full floor-by-floor history ──
+    // ── Room counts ──
+    shopVisits: shopFloors.length,
+    eventCount: eventFloors.length,
+    treasureCount: treasureFloors.length,
+
+    // ── Full floor log ──
     floors,
   };
 }
 
 // ─── Multi-run aggregator ─────────────────────────────────────────────────────
 
-/**
- * Parse multiple .run files and aggregate stats.
- * @param {Array} fileInfos - Output of findRunFiles()
- * @returns {Object} Aggregated weekly stats
- */
 function aggregateRunFiles(fileInfos) {
   const runs = [];
   const errors = [];
 
   for (const f of fileInfos) {
-    try {
-      runs.push(parseRunFile(f.path));
-    } catch (err) {
-      errors.push({ file: f.name, error: err.message });
-    }
+    try { runs.push(parseRunFile(f.path)); }
+    catch (err) { errors.push({ file: f.name, error: err.message }); }
   }
 
   if (runs.length === 0) return { runs: [], errors, stats: null };
 
-  const wins    = runs.filter(r => r.win);
-  const defeats = runs.filter(r => !r.win && !r.wasAbandoned);
+  const wins     = runs.filter(r => r.win);
+  const defeats  = runs.filter(r => !r.win && !r.wasAbandoned);
   const abandoned = runs.filter(r => r.wasAbandoned);
 
   // By character
   const byCharacter = {};
   for (const run of runs) {
     const c = run.character || 'UNKNOWN';
-    if (!byCharacter[c]) byCharacter[c] = { runs: 0, wins: 0, totalFloors: 0, maxFloor: 0, totalDmg: 0 };
+    if (!byCharacter[c]) byCharacter[c] = { runs: 0, wins: 0, totalFloors: 0, maxFloor: 0, totalDmg: 0, totalDuration: 0 };
     byCharacter[c].runs++;
     if (run.win) byCharacter[c].wins++;
     byCharacter[c].totalFloors += run.floorsReached;
-    byCharacter[c].maxFloor    = Math.max(byCharacter[c].maxFloor, run.floorsReached);
+    byCharacter[c].maxFloor     = Math.max(byCharacter[c].maxFloor, run.floorsReached);
     byCharacter[c].totalDmg    += run.totalDmgTaken;
+    byCharacter[c].totalDuration += run.runDurationMin;
   }
   for (const c of Object.values(byCharacter)) {
-    c.avgFloor  = +(c.totalFloors / c.runs).toFixed(1);
-    c.winRate   = `${Math.round(c.wins / c.runs * 100)}%`;
-    c.avgDmg    = +(c.totalDmg / c.runs).toFixed(0);
+    c.avgFloor      = +(c.totalFloors / c.runs).toFixed(1);
+    c.winRate       = `${Math.round(c.wins / c.runs * 100)}%`;
+    c.avgDmgPerRun  = +(c.totalDmg / c.runs).toFixed(0);
+    c.avgDurationMin = +(c.totalDuration / c.runs).toFixed(0);
   }
 
   // Defeat hotspots
@@ -290,30 +362,36 @@ function aggregateRunFiles(fileInfos) {
     defeatMap[loc] = (defeatMap[loc] || 0) + 1;
   }
 
-  // Relic frequency in wins vs defeats
-  const relicWins   = {};
+  // Relic intelligence
+  const relicWins = {};
   const relicDefeats = {};
   for (const r of wins)    r.relics.forEach(rel => { relicWins[rel.id]    = (relicWins[rel.id]    || 0) + 1; });
   for (const r of defeats) r.relics.forEach(rel => { relicDefeats[rel.id] = (relicDefeats[rel.id] || 0) + 1; });
 
-  // Most skipped cards (cards offered but declined repeatedly)
+  // Most skipped cards (frequently declined)
   const skipCount = {};
-  for (const r of runs) r.skippedCards.forEach(c => { skipCount[c] = (skipCount[c] || 0) + 1; });
+  for (const run of runs) run.skippedCards.forEach(c => { skipCount[c] = (skipCount[c] || 0) + 1; });
 
-  // Rest site behavior
+  // Most bought shop relics
+  const shopRelicCount = {};
+  for (const run of runs) run.allBoughtRelics.forEach(r => { shopRelicCount[r] = (shopRelicCount[r] || 0) + 1; });
+
+  // Neow (opening) pick stats
+  const neowCount = {};
+  for (const run of runs) if (run.neowPicked) neowCount[run.neowPicked] = (neowCount[run.neowPicked] || 0) + 1;
+
+  // Rest behavior aggregate
   const totalSmith = runs.reduce((s, r) => s + r.smithCount, 0);
   const totalRest  = runs.reduce((s, r) => s + r.restCount, 0);
 
-  // Avg deck size at end
-  const avgDeckSize = +(runs.reduce((s, r) => s + r.finalDeckSize, 0) / runs.length).toFixed(1);
-  const avgUpgrades = +(runs.reduce((s, r) => s + r.upgradedCardCount, 0) / runs.length).toFixed(1);
+  // Deck stats
+  const avgDeckSize  = +(runs.reduce((s, r) => s + r.finalDeckSize, 0) / runs.length).toFixed(1);
+  const avgUpgrades  = +(runs.reduce((s, r) => s + r.upgradedCardCount, 0) / runs.length).toFixed(1);
+  const avgRelics    = +(runs.reduce((s, r) => s + r.relicCount, 0) / runs.length).toFixed(1);
 
-  // Best run (most floors)
-  const bestRun = [...runs].sort((a, b) => b.floorsReached - a.floorsReached)[0];
-  // Fastest win
-  const fastestWin = wins.length
-    ? [...wins].sort((a, b) => a.runDurationSeconds - b.runDurationSeconds)[0]
-    : null;
+  const floorNums = runs.map(r => r.floorsReached);
+  const bestRun   = [...runs].sort((a, b) => b.floorsReached - a.floorsReached)[0];
+  const fastestWin = wins.length ? [...wins].sort((a, b) => a.runDurationSeconds - b.runDurationSeconds)[0] : null;
 
   return {
     runs,
@@ -329,52 +407,35 @@ function aggregateRunFiles(fileInfos) {
         .sort((a, b) => b[1] - a[1])
         .map(([enc, count]) => ({ encounter: enc, count })),
       relicStats: {
-        topInWins: Object.entries(relicWins)
-          .sort((a, b) => b[1] - a[1]).slice(0, 10)
-          .map(([relic, count]) => ({ relic, count })),
-        topInDefeats: Object.entries(relicDefeats)
-          .sort((a, b) => b[1] - a[1]).slice(0, 10)
-          .map(([relic, count]) => ({ relic, count })),
+        topInWins: topN(relicWins, 10),
+        topInDefeats: topN(relicDefeats, 10),
       },
-      mostSkippedCards: Object.entries(skipCount)
-        .sort((a, b) => b[1] - a[1]).slice(0, 10)
-        .map(([card, count]) => ({ card, count })),
+      mostSkippedCards: topN(skipCount, 10),
+      mostBoughtShopRelics: topN(shopRelicCount, 8),
+      neowPickStats: topN(neowCount, 5),
       restBehavior: {
         smithCount: totalSmith,
         restCount: totalRest,
         smithPreference: totalSmith + totalRest > 0
-          ? `${Math.round(totalSmith / (totalSmith + totalRest) * 100)}%`
-          : 'N/A',
+          ? `${Math.round(totalSmith / (totalSmith + totalRest) * 100)}%` : 'N/A',
       },
-      deckStats: { avgDeckSize, avgUpgrades },
+      deckStats: { avgDeckSize, avgUpgrades, avgRelics },
       floorStats: {
-        avg: +(runs.reduce((s, r) => s + r.floorsReached, 0) / runs.length).toFixed(1),
-        max: Math.max(...runs.map(r => r.floorsReached)),
-        min: Math.min(...runs.map(r => r.floorsReached)),
+        avg: +(floorNums.reduce((s, f) => s + f, 0) / floorNums.length).toFixed(1),
+        max: Math.max(...floorNums),
+        min: Math.min(...floorNums),
       },
       avgRunDurationMin: +(runs.reduce((s, r) => s + r.runDurationMin, 0) / runs.length).toFixed(0),
       avgDmgTaken: +(runs.reduce((s, r) => s + r.totalDmgTaken, 0) / runs.length).toFixed(0),
-      bestRun: bestRun ? {
-        runId: bestRun.runId,
-        floors: bestRun.floorsReached,
-        win: bestRun.win,
-        character: bestRun.character,
-        date: bestRun.startDate,
-      } : null,
-      fastestWin: fastestWin ? {
-        runId: fastestWin.runId,
-        durationMin: fastestWin.runDurationMin,
-        floors: fastestWin.floorsReached,
-        date: fastestWin.startDate,
-      } : null,
+      avgGoldSpent: +(runs.reduce((s, r) => s + r.totalGoldSpent, 0) / runs.length).toFixed(0),
+      bestRun: bestRun ? { runId: bestRun.runId, floors: bestRun.floorsReached, win: bestRun.win, character: bestRun.character, date: bestRun.startDate } : null,
+      fastestWin: fastestWin ? { runId: fastestWin.runId, durationMin: fastestWin.runDurationMin, floors: fastestWin.floorsReached, date: fastestWin.startDate } : null,
     },
   };
 }
 
-module.exports = {
-  parseRunFile,
-  findRunFiles,
-  findLatestRunFile,
-  aggregateRunFiles,
-  RUN_HISTORY_DIR,
-};
+function topN(obj, n) {
+  return Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => ({ id: k, count: v }));
+}
+
+module.exports = { parseRunFile, findRunFiles, findLatestRunFile, aggregateRunFiles, RUN_HISTORY_DIR };
