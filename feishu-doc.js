@@ -227,10 +227,15 @@ async function createDocument(token, title) {
   }
 
   const doc = res.data.document;
+  // User-facing doc URL:
+  //   CN users: https://feishu.cn/docx/<id>
+  //   Global (Lark): https://www.larksuite.com/docx/<id>
+  // open.feishu.cn is the *developer API* platform — it does NOT serve docs to users.
+  const docHost = process.env.FEISHU_DOC_HOST || 'https://feishu.cn';
   return {
     documentId: doc.document_id,
     revisionId: doc.revision_id,
-    url: `https://open.feishu.cn/docx/${doc.document_id}`,
+    url: `${docHost}/docx/${doc.document_id}`,
   };
 }
 
