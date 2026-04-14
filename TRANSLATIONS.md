@@ -33,10 +33,12 @@ git push
 
 | ID | 中文 | 英文 |
 |---|---|---|
-| `CHARACTER.SILENT` | 无声者 | Silent |
+| `CHARACTER.SILENT` | 静默猎手 | Silent |
 | `CHARACTER.IRONCLAD` | 铁甲战士 | Ironclad |
-| `CHARACTER.DEFECT` | 机器人 | Defect |
+| `CHARACTER.DEFECT` | 故障机器人 | Defect |
 | `CHARACTER.WATCHER` | 守望者 | Watcher |
+| `CHARACTER.REGENT` | 储君 | Regent |
+| `CHARACTER.NECROBINDER` | 亡灵契约师 | Necrobinder |
 
 ---
 
@@ -71,8 +73,19 @@ git push
 |---|---|
 | `ENCOUNTER.WATERFALL_GIANT_BOSS` | 瀑布巨人（Boss） |
 | `ENCOUNTER.LAGOON_TITAN_BOSS` | 海湾泰坦（Boss） |
-| `ENCOUNTER.TERROR_EEL_ELITE` | 恐惧电鳗（精英） |
+| `ENCOUNTER.TERROR_EEL_ELITE` | 恐惧鳗鱼（精英） |
 | `ENCOUNTER.GORGON_ELITE` | 戈尔贡（精英） |
+| `ENCOUNTER.BYRDOIDS_ELITE` | 多尼斯异鸟（精英） |
+| `ENCOUNTER.ENTOMANCER_ELITE` | 蜂群术士（精英） |
+| `ENCOUNTER.BYGONE_EFFIGY_ELITE` | 旧日雕像（精英） |
+| `ENCOUNTER.DECIMILLIPEDE_ELITE` | 千足虫（精英） |
+| `ENCOUNTER.INFESTED_PRISMS_ELITE` | 感染棱柱（精英） |
+| `ENCOUNTER.KNIGHTS_ELITE` | 幽灵骑士（精英） |
+| `ENCOUNTER.MECHA_KNIGHT_ELITE` | 机甲骑士（精英） |
+| `ENCOUNTER.PHANTASMAL_GARDENERS_ELITE` | 幻影园丁（精英） |
+| `ENCOUNTER.PHROG_PARASITE_ELITE` | 蛙类寄生虫（精英） |
+| `ENCOUNTER.SKULKING_COLONY_ELITE` | 潜行集群（精英） |
+| `ENCOUNTER.SOUL_NEXUS_ELITE` | 灵魂枢纽（精英） |
 
 ---
 

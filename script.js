@@ -15,24 +15,24 @@
  *   SAVE_REPORT      - if "true", save report to reports/ directory
  */
 
-const fs   = require('fs');
+const fs = require('fs');
 const path = require('path');
 
 const { parseRunFile, findLatestRunFile, findRunFilesForDate, listRunFiles, RUN_HISTORY_DIR } = require('./run-parser');
-const { parseLog, findLatestLogFile }                       = require('./parser');
-const { generateReport }                                    = require('./report');
-const { sendToFeishu, sendDocLinkCard, getTenantToken }     = require('./feishu');
-const { createReportDoc }                                   = require('./feishu-doc');
-const { generateRunReport }                                 = require('./run-report');
+const { parseLog, findLatestLogFile } = require('./parser');
+const { generateReport } = require('./report');
+const { sendToFeishu, sendDocLinkCard, getTenantToken } = require('./feishu');
+const { createReportDoc } = require('./feishu-doc');
+const { generateRunReport } = require('./run-report');
 
-const DRY_RUN      = process.env.DRY_RUN      === 'true';
-const LOG_FILE     = process.env.LOG_FILE      || null;
-const RUN_FILE     = process.env.RUN_FILE      || null;
-const RUN_DATE     = process.env.RUN_DATE      || null;  // 'YYYY-MM-DD' in CST
-const USE_GODOT    = process.env.USE_GODOT_LOG === 'true';
-const SAVE_REPORT  = process.env.SAVE_REPORT   === 'true';
-const CREATE_DOC   = process.env.CREATE_DOC    !== 'false';
-const LIST_MODE    = process.argv.includes('--list');
+const DRY_RUN = process.env.DRY_RUN === 'true';
+const LOG_FILE = process.env.LOG_FILE || null;
+const RUN_FILE = process.env.RUN_FILE || null;
+const RUN_DATE = process.env.RUN_DATE || null;  // 'YYYY-MM-DD' in CST
+const USE_GODOT = process.env.USE_GODOT_LOG === 'true';
+const SAVE_REPORT = process.env.SAVE_REPORT === 'true';
+const CREATE_DOC = process.env.CREATE_DOC !== 'false';
+const LIST_MODE = process.argv.includes('--list');
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
@@ -52,7 +52,7 @@ async function main() {
       console.log('   No .run files found in', RUN_HISTORY_DIR);
     } else {
       files.forEach((f, i) => {
-        console.log(`   ${String(i+1).padStart(2)}. ${f.name}  →  ${f.dateStr}`);
+        console.log(`   ${String(i + 1).padStart(2)}. ${f.name}  →  ${f.dateStr}`);
       });
     }
     return;
@@ -76,7 +76,7 @@ async function main() {
       }
       if (matches.length > 1) {
         console.log(`\n📋 Multiple runs found on ${RUN_DATE}:`);
-        matches.forEach((f, i) => console.log(`   ${i+1}. ${f.name}  (${new Date(f.startTime*1000).toLocaleTimeString('zh-CN', {timeZone:'Asia/Shanghai'})})` ));
+        matches.forEach((f, i) => console.log(`   ${i + 1}. ${f.name}  (${new Date(f.startTime * 1000).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai' })})`));
         console.log(`\n   Analyzing newest one. Use RUN_FILE=<filename> to pick a specific one.`);
       }
       runFilePath = matches[0].path; // newest first

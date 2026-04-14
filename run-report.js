@@ -9,28 +9,28 @@ const { translate, translateCharacter } = require('./translations');
 
 
 const ACT_LABELS = {
-  'ACT.UNDERDOCKS': 'Act 1 底码头',
-  'ACT.GLORY':      'Act 3 荣耀殿堂',
+  'ACT.UNDERDOCKS': 'Act 1 暗港',
+  'ACT.GLORY': 'Act 3 荣耀',
 };
 
 const ROOM_EMOJI = {
-  ancient:   '🌟',
-  monster:   '⚔️',
-  elite:     '💪',
-  boss:      '👹',
+  ancient: '🌟',
+  monster: '⚔️',
+  elite: '💪',
+  boss: '👹',
   rest_site: '🔥',
-  treasure:  '💰',
-  shop:      '🛒',
-  event:     '❓',
-  unknown:   '❓',
+  treasure: '💰',
+  shop: '🛒',
+  event: '❓',
+  unknown: '❓',
 };
 
 const REST_LABELS = {
-  SMITH:  '升级卡牌 (SMITH)',
-  REST:   '休息回血 (REST)',
+  SMITH: '升级卡牌 (SMITH)',
+  REST: '休息回血 (REST)',
   RECALL: '召回遗物 (RECALL)',
 };
-──────
+
 
 function generateRunReport(run) {
   const lines = [];
@@ -136,9 +136,9 @@ function generateRunReport(run) {
   if (run.totalUpgrades > 0) {
     lines.push(`## 🔧 升级明细（共 ${run.totalUpgrades} 次）`);
     lines.push('');
-    if (run.smithUpgrades.length > 0)    lines.push(`**营地升级 (SMITH × ${run.smithCount})：** ${run.smithUpgrades.map(c => translate(c,'card')).join(', ')}`);
-    if (run.treasureUpgrades.length > 0) lines.push(`**宝箱升级：** ${run.treasureUpgrades.map(c => translate(c,'card')).join(', ')}`);
-    if (run.eventUpgrades.length > 0)    lines.push(`**事件升级：** ${run.eventUpgrades.map(c => translate(c,'card')).join(', ')}`);
+    if (run.smithUpgrades.length > 0) lines.push(`**营地升级 (SMITH × ${run.smithCount})：** ${run.smithUpgrades.map(c => translate(c, 'card')).join(', ')}`);
+    if (run.treasureUpgrades.length > 0) lines.push(`**宝箱升级：** ${run.treasureUpgrades.map(c => translate(c, 'card')).join(', ')}`);
+    if (run.eventUpgrades.length > 0) lines.push(`**事件升级：** ${run.eventUpgrades.map(c => translate(c, 'card')).join(', ')}`);
     lines.push('');
   }
 
@@ -147,7 +147,7 @@ function generateRunReport(run) {
   lines.push('');
   run.relics.forEach(r => {
     const src = run.allBoughtRelics?.includes(r.id) ? ' 🛒' :
-                r.floorAdded === 1 ? ' 🌟' : '';
+      r.floorAdded === 1 ? ' 🌟' : '';
     const name = translate(r.id, 'relic');
     lines.push(`- ${name}${src} *(Floor ${r.floorAdded} | \`${r.id}\`)*`);
   });
@@ -160,7 +160,7 @@ function generateRunReport(run) {
     run.relicsOfferedNotTaken.forEach(r => { skipRelicCount[r] = (skipRelicCount[r] || 0) + 1; });
     const topSkipped = Object.entries(skipRelicCount).sort((a, b) => b[1] - a[1]).slice(0, 5);
     lines.push(`**跳过的遗物：**`);
-    topSkipped.forEach(([r, n]) => lines.push(`- ${translate(r,'relic')}${n > 1 ? ` ×${n}` : ''} *(\`${r}\`)*`));
+    topSkipped.forEach(([r, n]) => lines.push(`- ${translate(r, 'relic')}${n > 1 ? ` ×${n}` : ''} *(\`${r}\`)*`));
     lines.push('');
   }
 
@@ -168,8 +168,8 @@ function generateRunReport(run) {
   if (run.shopVisits > 0) {
     lines.push(`## 🛒 商店（${run.shopVisits} 次）`);
     lines.push('');
-    if (run.allShopCards.length > 0)    lines.push(`**购买卡牌：** ${run.allShopCards.map(c => translate(c,'card')).join(', ')}`);
-    if (run.allBoughtRelics.length > 0) lines.push(`**购买遗物：** ${run.allBoughtRelics.map(r => translate(r,'relic')).join(', ')}`);
+    if (run.allShopCards.length > 0) lines.push(`**购买卡牌：** ${run.allShopCards.map(c => translate(c, 'card')).join(', ')}`);
+    if (run.allBoughtRelics.length > 0) lines.push(`**购买遗物：** ${run.allBoughtRelics.map(r => translate(r, 'relic')).join(', ')}`);
     lines.push(`**总花费：** ${run.totalGoldSpent} 金币`);
     lines.push('');
   }
@@ -187,7 +187,7 @@ function generateRunReport(run) {
     run.skippedCards.forEach(c => { sc[c] = (sc[c] || 0) + 1; });
     const top = Object.entries(sc).sort((a, b) => b[1] - a[1]).slice(0, 5);
     lines.push(`**最常跳过：**`);
-    top.forEach(([c, n]) => lines.push(`- ${translate(c,'card')} ×${n} *(\`${c}\`)*`));
+    top.forEach(([c, n]) => lines.push(`- ${translate(c, 'card')} ×${n} *(\`${c}\`)*`));
     lines.push('');
   }
 
@@ -198,10 +198,10 @@ function generateRunReport(run) {
     if (run.allPotionsUsed.length > 0) {
       const pc = {};
       run.allPotionsUsed.forEach(p => { pc[p] = (pc[p] || 0) + 1; });
-      lines.push(`**使用：** ${Object.entries(pc).map(([p, n]) => `${translate(p,'potion')}${n > 1 ? `×${n}` : ''}`).join(', ')}`);
+      lines.push(`**使用：** ${Object.entries(pc).map(([p, n]) => `${translate(p, 'potion')}${n > 1 ? `×${n}` : ''}`).join(', ')}`);
     }
     if (run.finalPotions.length > 0) {
-      lines.push(`**剩余：** ${run.finalPotions.map(p => translate(p,'potion')).join(', ')}`);
+      lines.push(`**剩余：** ${run.finalPotions.map(p => translate(p, 'potion')).join(', ')}`);
     }
     lines.push('');
   }
@@ -225,16 +225,16 @@ function generateRunReport(run) {
   for (const f of run.floors) {
     if (f.mapPointType === 'ancient') continue; // shown in Neow section
     const emoji = ROOM_EMOJI[f.mapPointType] || ROOM_EMOJI[f.roomType] || '?';
-    const enc   = f.encounterId ? translate(f.encounterId) : f.mapPointType;
+    const enc = f.encounterId ? translate(f.encounterId) : f.mapPointType;
     const hpStr = f.hpEnd !== null ? `${f.hpEnd}/${f.hpMax}` : '-';
-    const dmg   = f.hpLost > 0 ? `-${f.hpLost}` : f.hpHealed > 0 ? `+${f.hpHealed}` : '0';
+    const dmg = f.hpLost > 0 ? `-${f.hpLost}` : f.hpHealed > 0 ? `+${f.hpHealed}` : '0';
     const gained = [
-      ...f.cardsGained.map(c => `🃏${translate(c,'card')}`),
-      ...f.relicChoices.filter(r => r.picked).map(r => `🏺${translate(r.id,'relic')}`),
-      ...f.boughtRelics.map(r => `🛒${translate(r,'relic')}`),
+      ...f.cardsGained.map(c => `🃏${translate(c, 'card')}`),
+      ...f.relicChoices.filter(r => r.picked).map(r => `🏺${translate(r.id, 'relic')}`),
+      ...f.boughtRelics.map(r => `🛒${translate(r, 'relic')}`),
       ...(f.restAction && f.restAction !== 'REST' ? [`🔥${REST_LABELS[f.restAction] || f.restAction}`] : []),
       ...(f.restAction === 'REST' && f.hpHealed > 0 ? [`❤️+${f.hpHealed}`] : []),
-      ...f.upgradedCards.map(c => `⬆️${translate(c,'card')}`),
+      ...f.upgradedCards.map(c => `⬆️${translate(c, 'card')}`),
     ].join(' ') || '-';
     lines.push(`| ${f.floor} | ${emoji} ${f.mapPointType} | ${enc} | ${hpStr} | ${dmg} | ${gained} |`);
   }
