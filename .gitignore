@@ -3,3 +3,11 @@ reports/*.md
 .env
 .DS_Store
 *.log
+
+# Scratch / temporary files — should never exist in project dir
+scratch/
+test_*.js
+make[0-9]*.js
+rebuild-*.js
+create-*.js
+*-guide-doc.js
