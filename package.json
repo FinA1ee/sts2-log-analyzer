@@ -1,0 +1,17 @@
+{
+  "name": "sts2-log-analysis",
+  "version": "1.0.0",
+  "description": "Slay the Spire 2 game log analyzer with Feishu report generation",
+  "main": "script.js",
+  "scripts": {
+    "start": "node script.js",
+    "dev": "LOG_FILE=godot.log DRY_RUN=true node script.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "node-fetch": "^3.3.2"
+  },
+  "keywords": ["slay-the-spire", "log-analysis", "feishu", "game"],
+  "author": "OpenClaw Agent",
+  "license": "MIT"
+}
