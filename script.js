@@ -18,7 +18,7 @@
 const fs   = require('fs');
 const path = require('path');
 
-const { parseRunFile, findLatestRunFile, RUN_HISTORY_DIR } = require('./run-parser');
+const { parseRunFile, findLatestRunFile, findRunFilesForDate, listRunFiles, RUN_HISTORY_DIR } = require('./run-parser');
 const { parseLog, findLatestLogFile }                       = require('./parser');
 const { generateReport }                                    = require('./report');
 const { sendToFeishu, sendDocLinkCard, getTenantToken }     = require('./feishu');
@@ -28,9 +28,11 @@ const { generateRunReport }                                 = require('./run-rep
 const DRY_RUN      = process.env.DRY_RUN      === 'true';
 const LOG_FILE     = process.env.LOG_FILE      || null;
 const RUN_FILE     = process.env.RUN_FILE      || null;
+const RUN_DATE     = process.env.RUN_DATE      || null;  // 'YYYY-MM-DD' in CST
 const USE_GODOT    = process.env.USE_GODOT_LOG === 'true';
 const SAVE_REPORT  = process.env.SAVE_REPORT   === 'true';
 const CREATE_DOC   = process.env.CREATE_DOC    !== 'false';
+const LIST_MODE    = process.argv.includes('--list');
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
@@ -42,12 +44,45 @@ async function main() {
   let reportMd;
   let summary;
 
+  // ── --list mode: show recent .run files ────────────────────────────────────
+  if (LIST_MODE) {
+    console.log('\n📂 Recent .run files (newest first):');
+    const files = listRunFiles(20);
+    if (files.length === 0) {
+      console.log('   No .run files found in', RUN_HISTORY_DIR);
+    } else {
+      files.forEach((f, i) => {
+        console.log(`   ${String(i+1).padStart(2)}. ${f.name}  →  ${f.dateStr}`);
+      });
+    }
+    return;
+  }
+
   if (!USE_GODOT) {
     // ── MODE 1: Parse .run file (preferred) ──────────────────────────────────
     let runFilePath;
+
     if (RUN_FILE) {
+      // Explicit filename
       runFilePath = path.join(RUN_HISTORY_DIR, RUN_FILE);
+
+    } else if (RUN_DATE) {
+      // Find all runs on a specific date (pure filename timestamp math)
+      const matches = findRunFilesForDate(RUN_DATE);
+      if (matches.length === 0) {
+        console.log(`\n❌ No .run files found for date: ${RUN_DATE} (CST)`);
+        console.log('   Try: node script.js --list  to see available dates');
+        process.exit(0);
+      }
+      if (matches.length > 1) {
+        console.log(`\n📋 Multiple runs found on ${RUN_DATE}:`);
+        matches.forEach((f, i) => console.log(`   ${i+1}. ${f.name}  (${new Date(f.startTime*1000).toLocaleTimeString('zh-CN', {timeZone:'Asia/Shanghai'})})` ));
+        console.log(`\n   Analyzing newest one. Use RUN_FILE=<filename> to pick a specific one.`);
+      }
+      runFilePath = matches[0].path; // newest first
+
     } else {
+      // Default: latest .run file
       const latest = findLatestRunFile();
       if (!latest) {
         console.log('[!] No .run files found, falling back to Godot log...');

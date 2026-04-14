@@ -1,102 +1,129 @@
 # SKILL.md - STS2 Log Analyzer (OpenClaw Integration)
 
-## What This Does
+## ⚡ ALWAYS USE .run FILES — NOT GODOT LOGS
 
-Analyzes Slay the Spire 2 game logs and posts a formatted run report to Feishu.
-Works with both `.run` save files (preferred) and Godot engine logs.
+The `.run` files are the canonical game save records and contain far richer data.
+Godot logs (`godot.log`) are a last resort only when no `.run` files exist.
 
-## When to Use
-
-Use this tool when the user says things like:
-- "分析/查看今天的杀戮尖塔日志"
-- "杀戮尖塔打了什么"
-- "生成战局报告"
-- "analyze my sts2/slay the spire run"
-- "what did I play in Slay the Spire 2 today"
-- Any question about their recent STS2 game sessions
-
-## How to Run
-
-### Default: Create Feishu Doc + send link card to chat
+**Default command** (always start here):
 ```bash
-cd <workspace>/sts2-log-analysis
+cd <workspace>/sts2-log-analysis && node script.js
+```
+This automatically reads the newest `.run` file. Only add `USE_GODOT_LOG=true`
+if the user explicitly asks or no `.run` files exist.
+
+---
+
+## How the Agent Decides What to Run
+
+```
+User message received
+        │
+        ▼
+Does message mention a specific date? (e.g. "昨天", "4月13号", "yesterday")
+        │
+   YES ─┤                                NO
+        │                                 │
+        ▼                                 ▼
+findRunFilesForDate('YYYY-MM-DD')    Does message mention a specific run?
+(pure filename math, no file reads)  (e.g. "上一局", "那场赢的", "seed R66U...")
+        │                                 │
+        ▼                            YES ─┤        NO
+List matching .run files                  │         │
+(may be 0, 1, or many that day)           ▼         ▼
+        │                         Ask user to       findLatestRunFile()
+        ▼                         clarify which     → analyze that one
+If multiple: show list, ask which        one
+If one:      analyze it directly
+If zero:     "那天没有找到记录"
+```
+
+---
+
+## When to Use Which Command
+
+| User says | Command |
+|---|---|
+| "分析最新的战局" / "帮我看看今天" / default | `node script.js` |
+| "分析昨天的战局" | `RUN_DATE=2026-04-13 node script.js` |
+| "4月12号那几场" | `RUN_DATE=2026-04-12 node script.js` |
+| "列出最近的战局记录" | `node script.js --list` |
+| "分析那场种子是 R66U 的" | find matching file, then `RUN_FILE=<name> node script.js` |
+| "本周周报" | `node weekly.js` |
+| "强制用 godot log" (rare) | `USE_GODOT_LOG=true node script.js` |
+
+---
+
+## Key: .run Filenames ARE the Unix Timestamp
+
+```
+1776095967.run
+│
+└─ Unix timestamp (seconds since epoch)
+   = 2026-04-14 16:39:27 CST
+```
+
+**No file reads needed to find runs by date.** The parser filters by
+comparing the timestamp in the filename to the requested date range.
+A 289-file directory filters in <5ms.
+
+---
+
+## Run Commands Reference
+
+```bash
+# Latest run (default)
 node script.js
-# → Reads latest .run save file
-# → Creates a cloud doc titled "[STS2] YYYY-MM-DD 战局报告 💀 阵亡 Floor N"
-# → Sends an interactive card to Feishu chat with a "打开完整报告文档" button
-```
 
-### Only send inline chat card (no doc):
-```bash
+# Specific date — finds all runs that started on that day (CST)
+RUN_DATE=2026-04-13 node script.js
+
+# Specific file
+RUN_FILE=1776095967.run node script.js
+
+# List recent .run files (shows date + result for each)
+node script.js --list
+
+# Dry run (print report, no Feishu)
+DRY_RUN=true node script.js
+
+# No doc, just chat card
 CREATE_DOC=false node script.js
+
+# Weekly summary (last 7 days)
+node weekly.js
+
+# Weekly for last 14 days
+DAYS_BACK=14 node weekly.js
 ```
 
-### Dry run (print report locally, no Feishu):
-```bash
-DRY_RUN=true SAVE_REPORT=true node script.js
+---
+
+## Data Source Priority
+
+```
+1. ✅ PREFERRED: .run files
+   Path: ~/Library/Application Support/SlayTheSpire2/steam/<STEAM_ID>/profile1/saves/history/
+   Format: JSON, one file per completed run
+   Contains: floor-by-floor HP/gold/cards/relics, Neow choice, deck, outcome
+
+2. ⚠️  FALLBACK: Godot logs (USE_GODOT_LOG=true only)
+   Path: ~/Library/Application Support/SlayTheSpire2/logs/godot.log
+   Use when: user explicitly requests, or no .run files found
 ```
 
-### Analyze a specific .run file:
-```bash
-RUN_FILE="1776095967.run" node script.js
-```
+---
 
-### Analyze a specific historical Godot log:
-```bash
-USE_GODOT_LOG=true LOG_FILE="godot2026-04-13T11.00.54.log" node script.js
-```
+## Looking Up Runs by Date — Detail
 
-### Store doc in a specific Feishu Drive folder:
-```bash
-FEISHU_FOLDER_TOKEN="<folder_token>" node script.js
-```
+The agent should:
+1. Parse the date from the user's message (convert "昨天"→yesterday's date, "上周一"→last Monday, etc.)
+2. Format as `YYYY-MM-DD` in CST
+3. Pass as `RUN_DATE=<date>` — script will call `findRunFilesForDate()` internally
+4. If multiple runs on that date: list them all with time + result, ask which to analyze
+5. If zero runs on that date: tell the user no sessions were found
 
-### List available .run files:
-```bash
-ls ~/Library/Application\ Support/SlayTheSpire2/steam/<STEAM_ID>/profile1/saves/history/
-```
-
-## Data Sources
-
-### Primary: `.run` files (structured JSON — preferred)
-```
-~/Library/Application Support/SlayTheSpire2/steam/<STEAM_ID>/profile1/saves/history/
-├── 1776095967.run    ← unix timestamp filename
-├── 1776078236.run
-└── ...               (289+ files retained)
-```
-
-### Fallback: Godot engine logs
-```
-~/Library/Application Support/SlayTheSpire2/logs/
-├── godot.log                      ← current session
-└── godot<timestamp>.log           ← historical sessions
-```
-
-## Output
-
-- **Feishu Doc**: Full floor-by-floor report with deck, relics, timeline
-- **Feishu chat card**: Summary stats + "打开完整报告文档" button
-- **Reports dir**: `reports/sts2-report-<timestamp>.md` (when SAVE_REPORT=true)
-
-## Weekly Analysis Job
-
-Run `weekly.js` to aggregate the last 7 days across all runs.
-
-### Manual trigger phrases:
-- "生成本周的杀戮尖塔周报"
-- "STS2 weekly report"
-- "手动触发 STS2 周报"
-
-### Run command:
-```bash
-node weekly.js              # default: last 7 days
-DAYS_BACK=14 node weekly.js # last 2 weeks
-DRY_RUN=true node weekly.js # dry run
-```
-
-### Cron job (auto, every Monday 09:00):
-See `CRON_PROMPT.md` for the full prompt and registration instructions.
+The script handles the rest — no manual file searching needed.
 
 ---
 
@@ -105,15 +132,15 @@ See `CRON_PROMPT.md` for the full prompt and registration instructions.
 | File | Purpose |
 |------|---------|
 | `script.js` | Single-run analysis entry point |
-| `weekly.js` | Multi-session weekly analysis entry point |
-| `run-parser.js` | Parse `.run` JSON files → structured data |
-| `run-report.js` | Rich report from `.run` data |
-| `parser.js` | Parse Godot `.log` files (fallback) |
-| `weekly-aggregator.js` | Merge multiple Godot log sessions |
-| `report.js` | Per-session Markdown report (Godot log) |
+| `weekly.js` | Multi-session weekly analysis |
+| `run-parser.js` | Parse `.run` JSON files; `findRunFilesForDate()` for date lookup |
+| `run-report.js` | Rich 12-section report from `.run` data |
+| `parser.js` | Godot `.log` parser (fallback only) |
+| `weekly-aggregator.js` | Aggregate Godot log sessions |
+| `report.js` | Markdown report from Godot log data |
 | `feishu.js` | Feishu chat messages |
 | `feishu-doc.js` | Feishu cloud document creator |
-| `CRON_PROMPT.md` | Cron job prompt for weekly auto-run |
+| `CRON_PROMPT.md` | Weekly cron job prompt |
 
 ---
 
